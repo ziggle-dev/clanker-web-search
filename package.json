@@ -1,6 +1,6 @@
 {
   "name": "@ziggler/web-search",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Web search tool using X AI's API for real-time web searches and Twitter/X searches",
   "type": "module",
   "main": "src/index.ts",

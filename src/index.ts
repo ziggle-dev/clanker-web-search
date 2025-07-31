@@ -4,6 +4,14 @@ import { createTool, ToolCategory, ToolCapability, ToolArguments, ToolContext } 
 const X_AI_API_URL = 'https://api.x.ai/v1/search';
 const DEFAULT_MAX_RESULTS = 10;
 
+// Settings interface to match Clanker's structure
+interface ClankerSettings {
+  apiKey: string;
+  provider: 'grok' | 'openai' | 'custom';
+  customBaseURL?: string;
+  [key: string]: any;
+}
+
 // Search result interface
 interface SearchResult {
   title: string;
@@ -29,16 +37,13 @@ interface XAISearchResponse {
 export default createTool()
   .id('web-search')
   .name('Web Search')
-  .description('Search the web and Twitter/X using X AI\'s API for real-time results')
+  .description('Search the web and Twitter/X using X AI\'s API for real-time results. Uses API key from Clanker settings.')
   .category(ToolCategory.Utility)
   .capabilities(ToolCapability.NetworkAccess)
   .tags('web', 'search', 'twitter', 'x', 'ai', 'api', 'internet', 'query')
   
   // Arguments
   .stringArg('query', 'Search query to execute', { required: true })
-  .stringArg('api_key', 'X AI API key (will use environment variable X_AI_API_KEY if not provided)', {
-    required: false
-  })
   .stringArg('search_type', 'Type of search: web, twitter, or all', {
     required: false,
     default: 'all',
@@ -61,16 +66,31 @@ export default createTool()
   
   // Execute
   .execute(async (args: ToolArguments, context: ToolContext) => {
-    const { query, api_key, search_type, max_results, time_range, language } = args;
+    const { query, search_type, max_results, time_range, language } = args;
     
-    // Get API key from args or environment
-    const apiKey = api_key || process.env.X_AI_API_KEY;
+    // Try to get API key from context state first (if Clanker stores it there)
+    let apiKey: string | undefined;
+    
+    // Check if Clanker has stored the API key in context state
+    const stateApiKey = context.state?.get('apiKey') || context.state?.get('clanker:apiKey');
+    if (stateApiKey && typeof stateApiKey === 'string') {
+      apiKey = stateApiKey;
+      context.logger?.debug('Using API key from context state');
+    }
+    
+    // Fall back to environment variables
+    if (!apiKey) {
+      apiKey = process.env.X_AI_API_KEY || process.env.GROK_API_KEY || process.env.OPENAI_API_KEY;
+      if (apiKey) {
+        context.logger?.debug('Using API key from environment variable');
+      }
+    }
     
     if (!apiKey) {
-      context.logger?.error('No API key provided');
+      context.logger?.error('No API key found in settings or environment');
       return {
         success: false,
-        error: 'X AI API key is required. Provide it via --api_key argument or set X_AI_API_KEY environment variable. Get one at https://x.ai/api'
+        error: 'X AI API key is required. For Clanker users: ensure Grok provider is configured in settings. Otherwise, set X_AI_API_KEY or GROK_API_KEY environment variable.'
       };
     }
     
@@ -219,11 +239,11 @@ export default createTool()
       result: 'Returns up to 20 English results from the past week'
     },
     {
-      description: 'Search all sources with API key',
+      description: 'Search all sources',
       arguments: {
         query: 'climate change news',
-        api_key: 'your-x-ai-api-key',
-        search_type: 'all'
+        search_type: 'all',
+        max_results: 15
       },
       result: 'Returns results from both web and Twitter/X'
     }

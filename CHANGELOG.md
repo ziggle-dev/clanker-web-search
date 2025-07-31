@@ -5,6 +5,18 @@ All notable changes to the Clanker Web Search tool will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2024-01-20
+
+### Changed
+- Improved API key integration with Clanker settings system
+- Tool now checks shared state for API key before environment variables
+- Removed redundant `api_key` argument
+- Better error messages for Clanker users
+
+### Added
+- Support for GROK_API_KEY environment variable
+- Automatic detection of API key from Clanker shared state
+
 ## [1.0.0] - 2024-01-20
 
 ### Added

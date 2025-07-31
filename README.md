@@ -29,17 +29,24 @@ clanker install --local /path/to/clanker-web-search
 
 ### API Key Setup
 
-The tool requires an X AI API key. You can provide it in two ways:
+The tool requires an X AI API key. There are several ways to provide it:
 
-1. **Environment Variable** (Recommended):
-   ```bash
-   export X_AI_API_KEY="your-api-key-here"
-   ```
+#### For Clanker Users (Recommended)
+If you're using Clanker with the Grok provider configured, the web search tool will automatically use the same API key from your Clanker settings.
 
-2. **Command Argument**:
-   ```bash
-   clanker run web-search --query "your search" --api_key "your-api-key-here"
-   ```
+#### Environment Variables
+Set one of these environment variables:
+```bash
+export X_AI_API_KEY="your-api-key-here"
+# OR (if using Grok)
+export GROK_API_KEY="your-api-key-here"
+```
+
+#### Integration with Clanker Settings
+The tool automatically checks for API keys in this order:
+1. Clanker shared state (if available)
+2. X_AI_API_KEY environment variable
+3. GROK_API_KEY environment variable (for Grok users)
 
 Get your API key at: https://x.ai/api
 
@@ -73,7 +80,6 @@ clanker run web-search \
 | Argument | Type | Required | Default | Description |
 |----------|------|----------|---------|-------------|
 | `query` | string | Yes | - | The search query to execute |
-| `api_key` | string | No | env:X_AI_API_KEY | X AI API key |
 | `search_type` | string | No | all | Type of search: `web`, `twitter`, or `all` |
 | `max_results` | number | No | 10 | Maximum results (1-50) |
 | `time_range` | string | No | all | Time filter: `hour`, `day`, `week`, `month`, `year`, `all` |
