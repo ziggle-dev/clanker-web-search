@@ -1,7 +1,7 @@
 import { createTool, ToolCategory, ToolCapability, ToolArguments, ToolContext } from '@ziggler/clanker';
 
 // X AI API configuration
-const X_AI_API_URL = 'https://api.x.ai/v1/search';
+const X_AI_API_URL = 'https://api.x.ai/v1/chat/completions';
 const DEFAULT_MAX_RESULTS = 10;
 
 // Settings interface to match Clanker's structure
@@ -14,30 +14,38 @@ interface ClankerSettings {
 
 // Search result interface
 interface SearchResult {
-  title: string;
-  url: string;
-  snippet: string;
-  source?: string;
-  timestamp?: string;
+  content: string;
+  citations?: string[];
+  sources_used?: number;
 }
 
-// X AI response interface
-interface XAISearchResponse {
-  results: Array<{
-    title: string;
-    url: string;
-    snippet: string;
-    source?: string;
-    published_at?: string;
+// X AI chat completion response interface
+interface XAIChatResponse {
+  id: string;
+  object: string;
+  created: number;
+  model: string;
+  choices: Array<{
+    index: number;
+    message: {
+      role: string;
+      content: string;
+    };
+    finish_reason: string;
   }>;
-  total_results?: number;
-  search_time?: number;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    num_sources_used?: number;
+  };
+  citations?: string[];
 }
 
 export default createTool()
   .id('web-search')
   .name('Web Search')
-  .description('Search the web and Twitter/X using X AI\'s API for real-time results. Uses API key from Clanker settings.')
+  .description('Search the web and Twitter/X using X AI\'s live search API with Grok. Uses API key from Clanker settings or environment.')
   .category(ToolCategory.Utility)
   .capabilities(ToolCapability.NetworkAccess)
   .tags('web', 'search', 'twitter', 'x', 'ai', 'api', 'internet', 'query')
@@ -98,26 +106,73 @@ export default createTool()
     context.logger?.debug(`Search type: ${search_type}, Max results: ${max_results}, Time range: ${time_range}`);
     
     try {
-      // Build search parameters
-      const searchParams = new URLSearchParams({
-        q: String(query),
-        type: String(search_type || 'all'),
-        limit: String(max_results || DEFAULT_MAX_RESULTS),
-        lang: String(language || 'en')
-      });
+      // Build search parameters based on search type
+      // For now, let's not specify sources and let the model decide\n      // const sources = search_type === 'twitter' ? ['x'] : search_type === 'web' ? ['web'] : undefined;
       
-      if (time_range && time_range !== 'all') {
-        searchParams.append('time_range', String(time_range));
+      // Calculate date range if specified
+      const toDate = new Date().toISOString().split('T')[0];
+      let fromDate: string | undefined;
+      
+      if (time_range !== 'all') {
+        const now = new Date();
+        switch (time_range) {
+          case 'hour':
+            now.setHours(now.getHours() - 1);
+            break;
+          case 'day':
+            now.setDate(now.getDate() - 1);
+            break;
+          case 'week':
+            now.setDate(now.getDate() - 7);
+            break;
+          case 'month':
+            now.setMonth(now.getMonth() - 1);
+            break;
+          case 'year':
+            now.setFullYear(now.getFullYear() - 1);
+            break;
+        }
+        fromDate = now.toISOString().split('T')[0];
       }
       
+      // Build request body with search parameters
+      const requestBody = {
+        model: 'grok-3',
+        messages: [
+          {
+            role: 'system',
+            content: search_type === 'twitter' 
+              ? `You are a search assistant. Search Twitter/X for the latest posts and information about: ${query}. Focus on recent tweets and discussions.`
+              : search_type === 'web'
+              ? `You are a search assistant. Search the web for information about: ${query}. Provide a comprehensive summary of the results from websites and articles.`
+              : `You are a search assistant. Search both the web and Twitter/X for information about: ${query}. Provide a comprehensive summary combining results from both sources.`
+          },
+          {
+            role: 'user',
+            content: query
+          }
+        ],
+        search_parameters: {
+          // sources: sources, // Commented out - let model decide
+          max_search_results: max_results || DEFAULT_MAX_RESULTS,
+          return_citations: true,
+          ...(fromDate && { from_date: fromDate }),
+          ...(toDate && { to_date: toDate })
+        },
+        stream: false
+      };
+      
+      context.logger?.debug('Request body:', JSON.stringify(requestBody, null, 2));
+      
       // Make API request
-      const response = await fetch(`${X_AI_API_URL}?${searchParams}`, {
-        method: 'GET',
+      const response = await fetch(X_AI_API_URL, {
+        method: 'POST',
         headers: {
           'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
           'Accept': 'application/json'
-        }
+        },
+        body: JSON.stringify(requestBody)
       });
       
       if (!response.ok) {
@@ -142,63 +197,45 @@ export default createTool()
         };
       }
       
-      const data = await response.json() as XAISearchResponse;
+      const data = await response.json() as XAIChatResponse;
       
-      if (!data.results || data.results.length === 0) {
-        context.logger?.info('No results found');
+      if (!data.choices || data.choices.length === 0) {
+        context.logger?.error('No response from API');
         return {
-          success: true,
-          output: `No results found for query: "${query}"`,
-          data: {
-            query,
-            results: [],
-            total_results: 0
-          }
+          success: false,
+          error: 'No response from X AI API'
         };
       }
       
-      // Format results for output
-      const results: SearchResult[] = data.results.map(result => ({
-        title: result.title,
-        url: result.url,
-        snippet: result.snippet,
-        source: result.source,
-        timestamp: result.published_at
-      }));
+      // Extract the search results from the model's response
+      const content = data.choices[0].message.content;
+      const sourcesUsed = data.usage?.num_sources_used || 0;
       
       // Create formatted output
-      let output = `Found ${results.length} results for "${query}":\n\n`;
+      let output = `## Search Results for "${query}"\n\n`;
+      output += content;
       
-      results.forEach((result, index) => {
-        output += `${index + 1}. **${result.title}**\n`;
-        output += `   URL: ${result.url}\n`;
-        if (result.source) {
-          output += `   Source: ${result.source}\n`;
-        }
-        if (result.timestamp) {
-          output += `   Published: ${new Date(result.timestamp).toLocaleString()}\n`;
-        }
-        output += `   ${result.snippet}\n\n`;
-      });
-      
-      if (data.total_results && data.total_results > results.length) {
-        output += `\n(Showing ${results.length} of ${data.total_results} total results)`;
+      if (data.citations && data.citations.length > 0) {
+        output += `\n\n### Sources:\n`;
+        data.citations.forEach((citation, index) => {
+          output += `${index + 1}. ${citation}\n`;
+        });
       }
       
-      if (data.search_time) {
-        output += `\nSearch completed in ${data.search_time}ms`;
+      if (sourcesUsed > 0) {
+        output += `\n\n*Searched ${sourcesUsed} sources*`;
       }
       
-      context.logger?.info(`Search completed successfully with ${results.length} results`);
+      context.logger?.info(`Search completed successfully using ${sourcesUsed} sources`);
       
       return {
         success: true,
         output: output.trim(),
         data: {
           query,
-          results,
-          total_results: data.total_results || results.length,
-          search_time: data.search_time
+          content,
+          citations: data.citations || [],
+          sources_used: sourcesUsed
         }
       };
     } catch (error) {
