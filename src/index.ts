@@ -79,11 +79,15 @@ export default createTool()
     // Try to get API key from context state first (if Clanker stores it there)
     let apiKey: string | undefined;
     
-    // Check if Clanker has stored the API key in context state
-    const stateApiKey = context.state?.get('apiKey') || context.state?.get('clanker:apiKey');
-    if (stateApiKey && typeof stateApiKey === 'string') {
-      apiKey = stateApiKey;
-      context.logger?.debug('Using API key from context state');
+    // Check if Clanker has stored the API key in shared state
+    // Use type assertion since the npm package might not have the latest types
+    const contextWithSharedState = context as any;
+    if (contextWithSharedState.sharedState) {
+      const sharedApiKey = contextWithSharedState.sharedState.get('clanker:apiKey');
+      if (sharedApiKey && typeof sharedApiKey === 'string') {
+        apiKey = sharedApiKey;
+        context.logger?.debug('Using API key from shared state');
+      }
     }
     
     // Fall back to environment variables
