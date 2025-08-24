@@ -1,45 +1,79 @@
 import { createTool, ToolCategory, ToolCapability, ToolArguments, ToolContext } from '@ziggler/clanker';
 
-// X AI API configuration
-const X_AI_API_URL = 'https://api.x.ai/v1/chat/completions';
+// Configuration constants
 const DEFAULT_MAX_RESULTS = 10;
+const X_AI_API_URL = 'https://api.x.ai/v1/chat/completions';
 
-// Settings interface to match Clanker's structure
-interface ClankerSettings {
-  apiKey: string;
-  provider: 'grok' | 'openai' | 'custom';
-  customBaseURL?: string;
-  [key: string]: any;
+/**
+ * Get API key from various sources
+ * Priority: Shared state > Environment variables
+ */
+function getApiKey(context: ToolContext): string | undefined {
+  let apiKey: string | undefined;
+  
+  // Try to get API key from shared state first
+  const contextWithSharedState = context as any;
+  if (contextWithSharedState.sharedState) {
+    // Try the standard clanker:apiKey location
+    const sharedApiKey = contextWithSharedState.sharedState.get('clanker:apiKey');
+    if (sharedApiKey && typeof sharedApiKey === 'string') {
+      apiKey = sharedApiKey;
+      context.logger?.debug('Using API key from shared state (clanker:apiKey)');
+      return apiKey;
+    }
+    
+    // Also try provider-specific locations
+    const provider = contextWithSharedState.sharedState.get('clanker:provider');
+    if (provider === 'grok' || provider === 'openai') {
+      const providerKey = contextWithSharedState.sharedState.get(`clanker:${provider}:apiKey`);
+      if (providerKey && typeof providerKey === 'string') {
+        apiKey = providerKey;
+        context.logger?.debug(`Using API key from shared state (clanker:${provider}:apiKey)`);
+        return apiKey;
+      }
+    }
+  }
+  
+  // Fall back to environment variables
+  apiKey = process.env.X_AI_API_KEY || process.env.GROK_API_KEY || process.env.OPENAI_API_KEY;
+  if (apiKey) {
+    context.logger?.debug('Using API key from environment variable');
+  }
+  
+  return apiKey;
 }
 
-// Search result interface
-interface SearchResult {
-  content: string;
-  citations?: string[];
-  sources_used?: number;
-}
-
-// X AI chat completion response interface
-interface XAIChatResponse {
-  id: string;
-  object: string;
-  created: number;
-  model: string;
-  choices: Array<{
-    index: number;
-    message: {
-      role: string;
-      content: string;
-    };
-    finish_reason: string;
-  }>;
-  usage?: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-    num_sources_used?: number;
-  };
-  citations?: string[];
+/**
+ * Calculate from date based on time range
+ */
+function calculateFromDate(timeRange: string): string | undefined {
+  if (timeRange === 'all') {
+    return undefined;
+  }
+  
+  const now = new Date();
+  
+  switch (timeRange) {
+    case 'hour':
+      now.setHours(now.getHours() - 1);
+      break;
+    case 'day':
+      now.setDate(now.getDate() - 1);
+      break;
+    case 'week':
+      now.setDate(now.getDate() - 7);
+      break;
+    case 'month':
+      now.setMonth(now.getMonth() - 1);
+      break;
+    case 'year':
+      now.setFullYear(now.getFullYear() - 1);
+      break;
+    default:
+      return undefined;
+  }
+  
+  return now.toISOString().split('T')[0];
 }
 
 export default createTool()
@@ -76,27 +110,8 @@ export default createTool()
   .execute(async (args: ToolArguments, context: ToolContext) => {
     const { query, search_type, max_results, time_range, language } = args;
     
-    // Try to get API key from context state first (if Clanker stores it there)
-    let apiKey: string | undefined;
-    
-    // Check if Clanker has stored the API key in shared state
-    // Use type assertion since the npm package might not have the latest types
-    const contextWithSharedState = context as any;
-    if (contextWithSharedState.sharedState) {
-      const sharedApiKey = contextWithSharedState.sharedState.get('clanker:apiKey');
-      if (sharedApiKey && typeof sharedApiKey === 'string') {
-        apiKey = sharedApiKey;
-        context.logger?.debug('Using API key from shared state');
-      }
-    }
-    
-    // Fall back to environment variables
-    if (!apiKey) {
-      apiKey = process.env.X_AI_API_KEY || process.env.GROK_API_KEY || process.env.OPENAI_API_KEY;
-      if (apiKey) {
-        context.logger?.debug('Using API key from environment variable');
-      }
-    }
+    // Get API key from various sources
+    const apiKey = getApiKey(context);
     
     if (!apiKey) {
       context.logger?.error('No API key found in settings or environment');
@@ -110,34 +125,9 @@ export default createTool()
     context.logger?.debug(`Search type: ${search_type}, Max results: ${max_results}, Time range: ${time_range}`);
     
     try {
-      // Build search parameters based on search type
-      // For now, let's not specify sources and let the model decide\n      // const sources = search_type === 'twitter' ? ['x'] : search_type === 'web' ? ['web'] : undefined;
-      
       // Calculate date range if specified
       const toDate = new Date().toISOString().split('T')[0];
-      let fromDate: string | undefined;
-      
-      if (time_range !== 'all') {
-        const now = new Date();
-        switch (time_range) {
-          case 'hour':
-            now.setHours(now.getHours() - 1);
-            break;
-          case 'day':
-            now.setDate(now.getDate() - 1);
-            break;
-          case 'week':
-            now.setDate(now.getDate() - 7);
-            break;
-          case 'month':
-            now.setMonth(now.getMonth() - 1);
-            break;
-          case 'year':
-            now.setFullYear(now.getFullYear() - 1);
-            break;
-        }
-        fromDate = now.toISOString().split('T')[0];
-      }
+      const fromDate = calculateFromDate(String(time_range));
       
       // Build request body with search parameters
       const requestBody = {
@@ -153,12 +143,11 @@ export default createTool()
           },
           {
             role: 'user',
-            content: query
+            content: String(query)
           }
         ],
         search_parameters: {
-          // sources: sources, // Commented out - let model decide
-          max_search_results: max_results || DEFAULT_MAX_RESULTS,
+          max_search_results: Number(max_results) || DEFAULT_MAX_RESULTS,
           return_citations: true,
           ...(fromDate && { from_date: fromDate }),
           ...(toDate && { to_date: toDate })
@@ -201,7 +190,7 @@ export default createTool()
         };
       }
       
-      const data = await response.json() as XAIChatResponse;
+      const data = await response.json() as any;
       
       if (!data.choices || data.choices.length === 0) {
         context.logger?.error('No response from API');
@@ -221,7 +210,7 @@ export default createTool()
       
       if (data.citations && data.citations.length > 0) {
         output += `\n\n### Sources:\n`;
-        data.citations.forEach((citation, index) => {
+        data.citations.forEach((citation: string, index: number) => {
           output += `${index + 1}. ${citation}\n`;
         });
       }

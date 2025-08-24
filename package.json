@@ -3,7 +3,7 @@
   "version": "2.0.1",
   "description": "Web search tool using X AI's API for real-time web searches and Twitter/X searches",
   "type": "module",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
   "author": {
     "name": "Ziggler",
     "email": "dev@ziggler.dev",
