@@ -5,6 +5,16 @@ All notable changes to the Clanker Web Search tool will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.3] - 2025-08-25
+
+### Changed
+- Updated for compatibility with Clanker 0.5.7's multi-file tool support
+- Tool now properly includes package.json with dependencies in distribution
+
+### Fixed
+- Dependencies are now automatically installed when tool is loaded
+- Tool works seamlessly with Clanker's new package manager enhancements
+
 ## [2.0.1] - 2025-07-31
 
 ### Fixed
