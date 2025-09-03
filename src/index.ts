@@ -154,6 +154,63 @@ export default createTool()
       custom_date_to
     } = args;
     
+    // Build descriptive status message
+    let statusParts: string[] = [`"${query}"`];
+    
+    // Add search type if not default
+    if (search_type && search_type !== 'all') {
+      statusParts.push(search_type === 'twitter' ? 'on Twitter/X' : 'on web');
+    }
+    
+    // Add time range
+    if (time_range && time_range !== 'all') {
+      statusParts.push(`from past ${time_range}`);
+    } else if (custom_date_from || custom_date_to) {
+      if (custom_date_from && custom_date_to) {
+        statusParts.push(`from ${custom_date_from} to ${custom_date_to}`);
+      } else if (custom_date_from) {
+        statusParts.push(`since ${custom_date_from}`);
+      } else if (custom_date_to) {
+        statusParts.push(`until ${custom_date_to}`);
+      }
+    }
+    
+    // Add domain filters
+    if (include_domains) {
+      const domains = String(include_domains).split(',').map(d => d.trim()).filter(d => d);
+      if (domains.length > 0) {
+        statusParts.push(`from ${domains.length === 1 ? domains[0] : domains.length + ' domains'}`);
+      }
+    }
+    
+    if (exclude_domains) {
+      const domains = String(exclude_domains).split(',').map(d => d.trim()).filter(d => d);
+      if (domains.length > 0) {
+        statusParts.push(`excluding ${domains.length === 1 ? domains[0] : domains.length + ' domains'}`);
+      }
+    }
+    
+    // Add result count if not default
+    if (max_results && max_results !== DEFAULT_MAX_RESULTS) {
+      statusParts.push(`(${max_results} results)`);
+    }
+    
+    // Add special flags
+    if (return_images) {
+      statusParts.push('with images');
+    }
+    
+    const recencyValue = Number(recency_weight);
+    if (!isNaN(recencyValue) && recencyValue > 0.7) {
+      statusParts.push('prioritizing recent');
+    } else if (!isNaN(recencyValue) && recencyValue < 0.3) {
+      statusParts.push('including older');
+    }
+    
+    // Log the descriptive status
+    const statusMessage = `Searching ${statusParts.join(' ')}`;
+    context.logger?.info(statusMessage);
+    
     // Get API key from various sources
     const apiKey = getApiKey(context);
     
@@ -165,8 +222,7 @@ export default createTool()
       };
     }
     
-    context.logger?.info(`Searching for: ${query}`);
-    context.logger?.debug(`Search type: ${search_type}, Max results: ${max_results}, Time range: ${time_range}`);
+    context.logger?.debug(`Full parameters: search_type=${search_type}, max_results=${max_results}, time_range=${time_range}, recency_weight=${recency_weight}`);
     
     try {
       // Calculate date range if specified
