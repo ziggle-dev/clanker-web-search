@@ -1,7 +1,7 @@
 {
   "name": "@ziggle-dev/web-search",
-  "version": "2.0.3",
-  "description": "Web search tool using X AI's API for real-time web searches and Twitter/X searches",
+  "version": "2.1.0",
+  "description": "Advanced web search tool using X AI's Grok API with configurable search parameters for web and Twitter/X searches",
   "type": "module",
   "main": "dist/index.js",
   "author": {

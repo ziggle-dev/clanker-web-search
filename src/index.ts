@@ -91,7 +91,7 @@ export default createTool()
     default: 'all',
     enum: ['web', 'twitter', 'all']
   })
-  .numberArg('max_results', 'Maximum number of results to return', {
+  .numberArg('max_results', 'Maximum number of results to return (max_search_results)', {
     required: false,
     default: DEFAULT_MAX_RESULTS,
     validate: (value: number) => value > 0 && value <= 50 || 'Max results must be between 1 and 50'
@@ -105,10 +105,54 @@ export default createTool()
     required: false,
     default: 'en'
   })
+  .booleanArg('return_citations', 'Whether to return source citations', {
+    required: false,
+    default: true
+  })
+  .booleanArg('return_images', 'Whether to return related images', {
+    required: false,
+    default: false
+  })
+  .stringArg('include_domains', 'Comma-separated list of domains to include (e.g., "wikipedia.org,github.com")', {
+    required: false
+  })
+  .stringArg('exclude_domains', 'Comma-separated list of domains to exclude (e.g., "facebook.com,instagram.com")', {
+    required: false
+  })
+  .stringArg('search_mode', 'Search mode: auto, on, or off (controls whether to use web search)', {
+    required: false,
+    default: 'on',
+    enum: ['auto', 'on', 'off']
+  })
+  .numberArg('recency_weight', 'Weight for recency (0.0 to 1.0) - higher values favor more recent results', {
+    required: false,
+    default: 0.5,
+    validate: (value: number) => value >= 0 && value <= 1 || 'Recency weight must be between 0.0 and 1.0'
+  })
+  .stringArg('custom_date_from', 'Custom start date for search (YYYY-MM-DD format)', {
+    required: false
+  })
+  .stringArg('custom_date_to', 'Custom end date for search (YYYY-MM-DD format)', {
+    required: false
+  })
   
   // Execute
   .execute(async (args: ToolArguments, context: ToolContext) => {
-    const { query, search_type, max_results, time_range, language } = args;
+    const { 
+      query, 
+      search_type, 
+      max_results, 
+      time_range, 
+      language,
+      return_citations,
+      return_images,
+      include_domains,
+      exclude_domains,
+      search_mode,
+      recency_weight,
+      custom_date_from,
+      custom_date_to
+    } = args;
     
     // Get API key from various sources
     const apiKey = getApiKey(context);
@@ -126,8 +170,57 @@ export default createTool()
     
     try {
       // Calculate date range if specified
-      const toDate = new Date().toISOString().split('T')[0];
-      const fromDate = calculateFromDate(String(time_range));
+      let toDate = custom_date_to || new Date().toISOString().split('T')[0];
+      let fromDate = custom_date_from || calculateFromDate(String(time_range));
+      
+      // Build search parameters object
+      const searchParameters: any = {
+        max_search_results: Number(max_results) || DEFAULT_MAX_RESULTS,
+        return_citations: return_citations !== false,
+        mode: search_mode || 'on'
+      };
+      
+      // Add date range if specified
+      if (fromDate) searchParameters.from_date = fromDate;
+      if (toDate && time_range !== 'all') searchParameters.to_date = toDate;
+      
+      // Add image results if requested
+      if (return_images) searchParameters.return_images = true;
+      
+      // Add recency weight if different from default
+      if (recency_weight !== undefined && recency_weight !== 0.5) {
+        searchParameters.recency_weight = Number(recency_weight);
+      }
+      
+      // Add domain filters if specified
+      if (include_domains) {
+        const domains = String(include_domains).split(',').map(d => d.trim()).filter(d => d);
+        if (domains.length > 0) {
+          searchParameters.include_domains = domains;
+        }
+      }
+      
+      if (exclude_domains) {
+        const domains = String(exclude_domains).split(',').map(d => d.trim()).filter(d => d);
+        if (domains.length > 0) {
+          searchParameters.exclude_domains = domains;
+        }
+      }
+      
+      // Build system message based on search type
+      let systemMessage = '';
+      if (search_type === 'twitter') {
+        systemMessage = `You are a search assistant. Search Twitter/X for the latest posts and information about: ${query}. Focus on recent tweets and discussions.`;
+      } else if (search_type === 'web') {
+        systemMessage = `You are a search assistant. Search the web for information about: ${query}. Provide a comprehensive summary of the results from websites and articles.`;
+      } else {
+        systemMessage = `You are a search assistant. Search both the web and Twitter/X for information about: ${query}. Provide a comprehensive summary combining results from both sources.`;
+      }
+      
+      // Add language preference if specified
+      if (language && language !== 'en') {
+        systemMessage += ` Prioritize results in ${language} language.`;
+      }
       
       // Build request body with search parameters
       const requestBody = {
@@ -135,23 +228,14 @@ export default createTool()
         messages: [
           {
             role: 'system',
-            content: search_type === 'twitter' 
-              ? `You are a search assistant. Search Twitter/X for the latest posts and information about: ${query}. Focus on recent tweets and discussions.`
-              : search_type === 'web'
-              ? `You are a search assistant. Search the web for information about: ${query}. Provide a comprehensive summary of the results from websites and articles.`
-              : `You are a search assistant. Search both the web and Twitter/X for information about: ${query}. Provide a comprehensive summary combining results from both sources.`
+            content: systemMessage
           },
           {
             role: 'user',
             content: String(query)
           }
         ],
-        search_parameters: {
-          max_search_results: Number(max_results) || DEFAULT_MAX_RESULTS,
-          return_citations: true,
-          ...(fromDate && { from_date: fromDate }),
-          ...(toDate && { to_date: toDate })
-        },
+        search_parameters: searchParameters,
         stream: false
       };
       
@@ -208,6 +292,20 @@ export default createTool()
       let output = `## Search Results for "${query}"\n\n`;
       output += content;
       
+      // Add images if returned
+      if (data.images && data.images.length > 0) {
+        output += `\n\n### Related Images:\n`;
+        data.images.forEach((image: any, index: number) => {
+          if (typeof image === 'string') {
+            output += `${index + 1}. ![Image ${index + 1}](${image})\n`;
+          } else if (image.url) {
+            output += `${index + 1}. ![${image.title || `Image ${index + 1}`}](${image.url})`;
+            if (image.source) output += ` - [Source](${image.source})`;
+            output += '\n';
+          }
+        });
+      }
+      
       if (data.citations && data.citations.length > 0) {
         output += `\n\n### Sources:\n`;
         data.citations.forEach((citation: string, index: number) => {
@@ -215,8 +313,15 @@ export default createTool()
         });
       }
       
-      if (sourcesUsed > 0) {
-        output += `\n\n*Searched ${sourcesUsed} sources*`;
+      // Add search metadata
+      const metadata: string[] = [];
+      if (sourcesUsed > 0) metadata.push(`${sourcesUsed} sources searched`);
+      if (searchParameters.include_domains) metadata.push(`Domains: ${searchParameters.include_domains.join(', ')}`);
+      if (searchParameters.exclude_domains) metadata.push(`Excluded: ${searchParameters.exclude_domains.join(', ')}`);
+      if (recency_weight !== 0.5) metadata.push(`Recency weight: ${recency_weight}`);
+      
+      if (metadata.length > 0) {
+        output += `\n\n*${metadata.join(' | ')}*`;
       }
       
       context.logger?.info(`Search completed successfully using ${sourcesUsed} sources`);
@@ -228,7 +333,9 @@ export default createTool()
           query,
           content,
           citations: data.citations || [],
-          sources_used: sourcesUsed
+          images: data.images || [],
+          sources_used: sourcesUsed,
+          search_parameters: searchParameters
         }
       };
     } catch (error) {
@@ -243,7 +350,7 @@ export default createTool()
   // Examples
   .examples([
     {
-      description: 'Search the web for information',
+      description: 'Basic web search',
       arguments: {
         query: 'latest AI developments 2024'
       },
@@ -259,23 +366,54 @@ export default createTool()
       result: 'Returns recent Twitter/X posts about OpenAI'
     },
     {
-      description: 'Search with custom parameters',
+      description: 'Search with domain filtering',
       arguments: {
         query: 'machine learning tutorials',
         max_results: 20,
-        language: 'en',
-        time_range: 'week'
+        include_domains: 'github.com,arxiv.org',
+        exclude_domains: 'facebook.com'
       },
-      result: 'Returns up to 20 English results from the past week'
+      result: 'Returns results only from GitHub and arXiv, excluding Facebook'
     },
     {
-      description: 'Search all sources',
+      description: 'Search with custom date range',
       arguments: {
-        query: 'climate change news',
+        query: 'climate change research',
+        custom_date_from: '2024-01-01',
+        custom_date_to: '2024-06-30',
+        return_citations: true
+      },
+      result: 'Returns results from first half of 2024 with source citations'
+    },
+    {
+      description: 'Search prioritizing recent results',
+      arguments: {
+        query: 'breaking news technology',
+        recency_weight: 0.9,
+        max_results: 30,
+        time_range: 'day'
+      },
+      result: 'Returns up to 30 results heavily weighted toward most recent content'
+    },
+    {
+      description: 'Search with images',
+      arguments: {
+        query: 'SpaceX Starship launch',
+        return_images: true,
         search_type: 'all',
         max_results: 15
       },
-      result: 'Returns results from both web and Twitter/X'
+      result: 'Returns results from web and Twitter with related images'
+    },
+    {
+      description: 'Academic search',
+      arguments: {
+        query: 'quantum computing algorithms',
+        include_domains: 'arxiv.org,scholar.google.com,ieee.org',
+        recency_weight: 0.3,
+        max_results: 25
+      },
+      result: 'Returns academic results with less emphasis on recency'
     }
   ])
   
